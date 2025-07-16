@@ -1,0 +1,486 @@
+import:py from datetime { datetime }
+import:py import random
+import:py from mtllm.llm { Model }
+
+# Initialize AI model
+glob llm = Model(model_name="gpt-4o", verbose=False);
+
+# AI Functions for dynamic content generation
+"""Generate dynamic room description based on player actions and context"""
+def generate_room_description(room_name: str, player_history: list[str], current_items: list[str]) -> str by llm();
+
+"""Create contextual story events based on player choices"""
+def generate_story_event(player_name: str, current_room: str, inventory: list[str], last_actions: list[str]) -> str by llm();
+
+"""Generate intelligent NPC dialogue based on context"""
+def generate_npc_dialogue(npc_name: str, player_name: str, conversation_history: list[str], current_situation: str) -> str by llm();
+
+"""Create adaptive quest suggestions based on player progress"""
+def suggest_quest(player_level: int, inventory: list[str], completed_quests: list[str]) -> str by llm();
+
+"""Generate combat narration with dynamic outcomes"""
+def generate_combat_story(player_name: str, monster_name: str, player_inventory: list[str], outcome: str) -> str by llm();
+
+# Main Adventure API Walker
+walker AdventureAPI {
+    has player_id: str;
+    has action: str = "status";
+    has target: str = "";
+    has dialogue: str = "";
+    has item_name: str = "";
+    
+    # Player Management
+    can create_player with `root entry {
+        new_player = spawn here --> player(
+            player_id=self.player_id,
+            name=self.target,
+            current_room="mystical_grove",
+            health=100,
+            experience=0,
+            inventory=["enchanted dagger", "healing potion"],
+            action_history=["started_adventure"],
+            conversation_history=[],
+            completed_quests=[]
+        );
+        return {
+            "status": "player_created", 
+            "player_id": self.player_id,
+            "starting_room": "mystical_grove",
+            "timestamp": datetime.now().isoformat()
+        };
+    }
+    
+    can get_player_status with `root entry {
+        players = visit --> player;
+        current_player = [p for p in players if p.player_id == self.player_id];
+        
+        if current_player {
+            p = current_player[0];
+            return {
+                "player_id": p.player_id,
+                "name": p.name,
+                "current_room": p.current_room,
+                "health": p.health,
+                "experience": p.experience,
+                "level": p.experience // 100,
+                "inventory": p.inventory,
+                "last_actions": p.action_history[-3:] if len(p.action_history) >= 3 else p.action_history,
+                "completed_quests": p.completed_quests,
+                "timestamp": datetime.now().isoformat()
+            };
+        }
+        return {"error": "Player not found"};
+    }
+    
+    # Room and World Exploration
+    can get_dynamic_room with `root entry {
+        players = visit --> player;
+        rooms = visit --> room;
+        
+        current_player = [p for p in players if p.player_id == self.player_id];
+        current_room = [r for r in rooms if r.name == self.target];
+        
+        if current_player and current_room {
+            p = current_player[0];
+            r = current_room[0];
+            
+            # Generate AI-enhanced content
+            dynamic_desc = generate_room_description(
+                r.name, 
+                p.action_history, 
+                r.items
+            );
+            
+            story_event = generate_story_event(
+                p.name,
+                r.name,
+                p.inventory,
+                p.action_history[-3:] if len(p.action_history) >= 3 else p.action_history
+            );
+            
+            # Get connected rooms (exits)
+            exits = visit --> room;
+            
+            return {
+                "room_name": r.name,
+                "base_description": r.description,
+                "dynamic_description": dynamic_desc,
+                "story_event": story_event,
+                "items": r.items,
+                "monsters": r.monsters,
+                "npcs": r.npcs,
+                "exits": [exit.name for exit in exits],
+                "secrets": r.secrets,
+                "timestamp": datetime.now().isoformat()
+            };
+        }
+        return {"error": "Player or room not found"};
+    }
+    
+    can move_player with `root entry {
+        players = visit --> player;
+        rooms = visit --> room;
+        
+        current_player = [p for p in players if p.player_id == self.player_id];
+        target_room = [r for r in rooms if r.name == self.target];
+        
+        if current_player and target_room {
+            p = current_player[0];
+            p.current_room = self.target;
+            p.action_history.append(f"moved_to:{self.target}");
+            p.experience += 5;
+            
+            return {
+                "status": "moved",
+                "new_room": self.target,
+                "experience_gained": 5,
+                "timestamp": datetime.now().isoformat()
+            };
+        }
+        return {"error": "Cannot move to that location"};
+    }
+    
+    # Combat System
+    can fight_monster with `root entry {
+        players = visit --> player;
+        rooms = visit --> room;
+        
+        current_player = [p for p in players if p.player_id == self.player_id];
+        current_room = [r for r in rooms if r.name == current_player[0].current_room];
+        
+        if current_player and current_room and self.target in current_room[0].monsters {
+            p = current_player[0];
+            r = current_room[0];
+            
+            # Combat calculation
+            base_damage = 15;
+            weapon_bonus = 10 if any("sword" in item or "blade" in item for item in p.inventory) else 0;
+            total_damage = base_damage + weapon_bonus;
+            
+            # Player takes damage
+            monster_damage = random.randint(10, 25);
+            p.health -= monster_damage;
+            p.experience += 30;
+            
+            # Remove monster and add loot
+            r.monsters.remove(self.target);
+            loot_items = ["gold coin", "magic gem", "healing potion", "ancient scroll"];
+            loot = random.choice(loot_items);
+            r.items.append(loot);
+            
+            # Generate combat story
+            outcome = "victory" if p.health > 0 else "defeat";
+            combat_story = generate_combat_story(p.name, self.target, p.inventory, outcome);
+            
+            p.action_history.append(f"fought:{self.target}");
+            
+            return {
+                "status": "combat_complete",
+                "outcome": outcome,
+                "damage_dealt": total_damage,
+                "damage_taken": monster_damage,
+                "experience_gained": 30,
+                "loot_found": loot,
+                "current_health": p.health,
+                "combat_story": combat_story,
+                "timestamp": datetime.now().isoformat()
+            };
+        }
+        return {"error": "Monster not found in current room"};
+    }
+    
+    # Inventory Management
+    can take_item with `root entry {
+        players = visit --> player;
+        rooms = visit --> room;
+        
+        current_player = [p for p in players if p.player_id == self.player_id];
+        current_room = [r for r in rooms if r.name == current_player[0].current_room];
+        
+        if current_player and current_room and self.target in current_room[0].items {
+            p = current_player[0];
+            r = current_room[0];
+            
+            r.items.remove(self.target);
+            p.inventory.append(self.target);
+            p.action_history.append(f"took:{self.target}");
+            
+            return {
+                "status": "item_taken",
+                "item": self.target,
+                "inventory": p.inventory,
+                "timestamp": datetime.now().isoformat()
+            };
+        }
+        return {"error": "Item not found in current room"};
+    }
+    
+    can use_item with `root entry {
+        players = visit --> player;
+        current_player = [p for p in players if p.player_id == self.player_id];
+        
+        if current_player and self.target in current_player[0].inventory {
+            p = current_player[0];
+            effect = "";
+            
+            if "healing" in self.target.lower() {
+                heal_amount = 30;
+                p.health = min(100, p.health + heal_amount);
+                effect = f"Healed {heal_amount} HP";
+            } elif "magic" in self.target.lower() or "scroll" in self.target.lower() {
+                exp_gain = 15;
+                p.experience += exp_gain;
+                effect = f"Gained {exp_gain} experience";
+            } elif "coin" in self.target.lower() {
+                p.experience += 5;
+                effect = "Gained 5 experience from coin";
+            }
+            
+            p.inventory.remove(self.target);
+            p.action_history.append(f"used:{self.target}");
+            
+            return {
+                "status": "item_used",
+                "item": self.target,
+                "effect": effect,
+                "current_health": p.health,
+                "current_experience": p.experience,
+                "timestamp": datetime.now().isoformat()
+            };
+        }
+        return {"error": "Item not in inventory"};
+    }
+    
+    # NPC Interaction
+    can talk_to_npc with `root entry {
+        players = visit --> player;
+        rooms = visit --> room;
+        
+        current_player = [p for p in players if p.player_id == self.player_id];
+        current_room = [r for r in rooms if r.name == current_player[0].current_room];
+        
+        if current_player and current_room and self.target in current_room[0].npcs {
+            p = current_player[0];
+            
+            # Generate AI response
+            npc_response = generate_npc_dialogue(
+                self.target,
+                p.name,
+                p.conversation_history,
+                f"Player is in {p.current_room} with items: {p.inventory}. Health: {p.health}, Experience: {p.experience}"
+            );
+            
+            # Update conversation history
+            p.conversation_history.append(f"Player to {self.target}: {self.dialogue}");
+            p.conversation_history.append(f"{self.target} to Player: {npc_response}");
+            p.action_history.append(f"talked_to:{self.target}");
+            
+            return {
+                "npc": self.target,
+                "player_message": self.dialogue,
+                "npc_response": npc_response,
+                "timestamp": datetime.now().isoformat()
+            };
+        }
+        return {"error": "NPC not found in current room"};
+    }
+    
+    # Quest System
+    can get_quest_suggestion with `root entry {
+        players = visit --> player;
+        current_player = [p for p in players if p.player_id == self.player_id];
+        
+        if current_player {
+            p = current_player[0];
+            player_level = p.experience // 100;
+            
+            quest_suggestion = suggest_quest(
+                player_level,
+                p.inventory,
+                p.completed_quests
+            );
+            
+            return {
+                "quest_suggestion": quest_suggestion,
+                "player_level": player_level,
+                "suitable_for_level": player_level,
+                "timestamp": datetime.now().isoformat()
+            };
+        }
+        return {"error": "Player not found"};
+    }
+    
+    can complete_quest with `root entry {
+        players = visit --> player;
+        current_player = [p for p in players if p.player_id == self.player_id];
+        
+        if current_player {
+            p = current_player[0];
+            quest_reward = random.randint(50, 100);
+            
+            p.completed_quests.append(self.target);
+            p.experience += quest_reward;
+            p.action_history.append(f"completed_quest:{self.target}");
+            
+            return {
+                "status": "quest_completed",
+                "quest_name": self.target,
+                "experience_reward": quest_reward,
+                "total_experience": p.experience,
+                "new_level": p.experience // 100,
+                "timestamp": datetime.now().isoformat()
+            };
+        }
+        return {"error": "Player not found"};
+    }
+    
+    # World Information
+    can get_world_map with `root entry {
+        rooms = visit --> room;
+        room_connections = {};
+        
+        for room in rooms {
+            connected_rooms = visit --> room;
+            room_connections[room.name] = {
+                "description": room.description,
+                "exits": [exit.name for exit in connected_rooms],
+                "has_items": len(room.items) > 0,
+                "has_monsters": len(room.monsters) > 0,
+                "has_npcs": len(room.npcs) > 0
+            };
+        }
+        
+        return {
+            "world_map": room_connections,
+            "total_rooms": len(rooms),
+            "timestamp": datetime.now().isoformat()
+        };
+    }
+}
+
+# Player Node - Represents game state for each player
+node player {
+    has player_id: str;
+    has name: str;
+    has current_room: str = "mystical_grove";
+    has health: int = 100;
+    has experience: int = 0;
+    has inventory: list[str] = [];
+    has action_history: list[str] = [];
+    has conversation_history: list[str] = [];
+    has completed_quests: list[str] = [];
+    has creation_time: str = datetime.now().isoformat();
+}
+
+# Room Node - Represents locations in the game world
+node room {
+    has name: str;
+    has description: str;
+    has items: list[str] = [];
+    has monsters: list[str] = [];
+    has npcs: list[str] = [];
+    has secrets: list[str] = [];
+    has visit_count: int = 0;
+}
+
+# Initialize the game world when running in CLI mode
+with entry:__main__ {
+    print("🌟 Initializing AI-Enhanced Text Adventure World...\n");
+    
+    # Create the game world with connected rooms
+    grove = root spawn --> room(
+        "mystical_grove",
+        "An ancient grove where magic flows through every leaf and branch",
+        ["silver coin", "mysterious map", "healing herb"],
+        ["Shadow Wolf"],
+        ["Sage Eldara", "Forest Spirit"],
+        ["hidden_portal_rune"]
+    );
+    
+    caverns = root spawn --> room(
+        "crystal_caverns",
+        "Shimmering caverns filled with resonating crystals that hum with power",
+        ["crystal shard", "ancient rune", "glowing moss"],
+        ["Crystal Golem", "Echo Wraith"],
+        ["Crystal Guardian", "Lost Miner"],
+        ["time_chamber_key"]
+    );
+    
+    citadel = root spawn --> room(
+        "sky_citadel",
+        "A magnificent floating citadel among the clouds, defying gravity",
+        ["cloud essence", "wind blade", "star fragment"],
+        ["Sky Serpent", "Storm Elemental"],
+        ["Sky Lord", "Wind Dancer"],
+        ["star_gate_crystal"]
+    );
+    
+    depths = root spawn --> room(
+        "abyssal_depths",
+        "The deepest part of the world, where ancient powers sleep",
+        ["void shard", "primordial essence", "shadow cloak"],
+        ["Void Leviathan", "Darkness Incarnate"],
+        ["The Forgotten One", "Abyss Walker"],
+        ["reality_anchor"]
+    );
+    
+    temple = root spawn --> room(
+        "celestial_temple",
+        "A sacred temple floating in space, surrounded by stars",
+        ["divine orb", "celestial staff", "phoenix feather"],
+        ["Fallen Angel", "Cosmic Horror"],
+        ["High Priestess", "Star Oracle"],
+        ["ascension_portal"]
+    );
+    
+    # Connect the rooms to create the game world
+    grove spawn --> caverns;
+    grove spawn --> citadel;
+    caverns spawn --> depths;
+    caverns spawn --> temple;
+    citadel spawn --> temple;
+    citadel spawn --> depths;
+    depths spawn --> temple;
+    
+    print("✅ World created with 5 connected realms");
+    print("🏰 Rooms: Mystical Grove, Crystal Caverns, Sky Citadel, Abyssal Depths, Celestial Temple\n");
+    
+    # Create a test player and demonstrate features
+    print("🎮 Creating test player...");
+    result = root spawn AdventureAPI("demo_player", "create_player", "Hero");
+    print(f"Player created: {result['status']}\n");
+    
+    # Show player status
+    print("👤 Player Status:");
+    status = root spawn AdventureAPI("demo_player", "get_player_status");
+    print(f"Name: {status['name']}, Health: {status['health']}, XP: {status['experience']}, Level: {status['level']}");
+    print(f"Inventory: {', '.join(status['inventory'])}\n");
+    
+    # Demonstrate dynamic room description
+    print("🏞️ Dynamic Room Description:");
+    room_info = root spawn AdventureAPI("demo_player", "get_dynamic_room", "mystical_grove");
+    print(f"Room: {room_info['room_name']}");
+    print(f"Base: {room_info['base_description']}");
+    print(f"Dynamic: {room_info['dynamic_description']}");
+    print(f"Story Event: {room_info['story_event']}\n");
+    
+    # Show available actions
+    print("⚔️ Available Items:", ', '.join(room_info['items']));
+    print("👹 Monsters:", ', '.join(room_info['monsters']));
+    print("👥 NPCs:", ', '.join(room_info['npcs']));
+    print("🚪 Exits:", ', '.join(room_info['exits']));
+    
+    # Demonstrate quest system
+    print("\n🎯 Quest Suggestion:");
+    quest = root spawn AdventureAPI("demo_player", "get_quest_suggestion");
+    print(f"Level {quest['player_level']} Quest: {quest['quest_suggestion']}\n");
+    
+    # Show world map
+    print("🗺️ World Map:");
+    world_map = root spawn AdventureAPI("demo_player", "get_world_map");
+    for room_name, room_data in world_map['world_map'].items():
+        print(f"  {room_name}: {len(room_data['exits'])} exits, Items: {room_data['has_items']}, Monsters: {room_data['has_monsters']}, NPCs: {room_data['has_npcs']}");
+    
+    print(f"\n🚀 Game ready! Deploy with: jac serve adventure.jac");
+    print("📡 API endpoints will be available for multiplayer adventure!");
+}
