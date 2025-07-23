@@ -1,27 +1,83 @@
-import:py from datetime { datetime }
-import:py import random
-import:py from mtllm.llm { Model }
+import py "datetime"
+import py "random"
+import py "mtllm.llm"
 
-# Initialize AI model
-glob llm = Model(model_name="gpt-4o", verbose=False);
+# -----------------------------------------------------------------------------
+# Global Python-side LLM handle (imported through Jac's py import bridge)
+# -----------------------------------------------------------------------------
+# NOTE:
+#   • Access Python modules through the "py." namespace.
+#   • mtllm.llm exposes Model; we instantiate one global instance here.
+#   • Adjust model_name / args to match your local MTLLM install.
+# -----------------------------------------------------------------------------
+glob llm = py.mtllm.llm.Model(model_name="gpt-4o", verbose=False);
 
-# AI Functions for dynamic content generation
+# -----------------------------------------------------------------------------
+# AI Helper Functions (Jac funcs that call the Python LLM model)
+# -----------------------------------------------------------------------------
+# These are deliberately thin wrappers so they can be called directly from Jac
+# walker behaviors without needing an intermediate can_call. If you prefer a
+# Python can bridge, you can refactor later (see earlier discussion).
+# -----------------------------------------------------------------------------
+
 """Generate dynamic room description based on player actions and context"""
-def generate_room_description(room_name: str, player_history: list[str], current_items: list[str]) -> str by llm();
+def generate_room_description(room_name: str, player_history: list[str], current_items: list[str]) -> str {
+    # Build a lightweight instruction prompt. You can tune this.
+    prompt = f"You are the narration engine for a fantasy text adventure.\n" \
+             f"Current room: {room_name}.\n" \
+             f"Player recent history: {player_history}.\n" \
+             f"Visible items: {current_items}.\n" \
+             f"Write an immersive, 3-5 sentence description that reacts to history.";
+    # Call Python LLM. (Assumes your Model exposes a .complete(prompt=..., ...) API.)
+    resp = llm.complete(prompt=prompt, max_tokens=160, temperature=0.75);
+    return resp;
+}
 
 """Create contextual story events based on player choices"""
-def generate_story_event(player_name: str, current_room: str, inventory: list[str], last_actions: list[str]) -> str by llm();
+def generate_story_event(player_name: str, current_room: str, inventory: list[str], last_actions: list[str]) -> str {
+    prompt = f"Player: {player_name}\nRoom: {current_room}\nInventory: {inventory}\nRecent actions: {last_actions}\n" \
+             f"Generate ONE short story beat (1-2 sentences) that may trigger tension, reward, or hint.";
+    resp = llm.complete(prompt=prompt, max_tokens=100, temperature=0.85);
+    return resp;
+}
 
 """Generate intelligent NPC dialogue based on context"""
-def generate_npc_dialogue(npc_name: str, player_name: str, conversation_history: list[str], current_situation: str) -> str by llm();
+def generate_npc_dialogue(npc_name: str, player_name: str, conversation_history: list[str], current_situation: str) -> str {
+    hist_preview = conversation_history[-5:] if len(conversation_history) > 5 else conversation_history;
+    prompt = f"You are {npc_name}, an NPC in a fantasy text adventure.\n" \
+             f"Talking to player {player_name}.\n" \
+             f"Recent convo: {hist_preview}.\n" \
+             f"Situation: {current_situation}.\n" \
+             f"Reply in-character, <= 3 sentences, may include hint or quest pointer.";
+    resp = llm.complete(prompt=prompt, max_tokens=120, temperature=0.9);
+    return resp;
+}
 
 """Create adaptive quest suggestions based on player progress"""
-def suggest_quest(player_level: int, inventory: list[str], completed_quests: list[str]) -> str by llm();
+def suggest_quest(player_level: int, inventory: list[str], completed_quests: list[str]) -> str {
+    prompt = f"Suggest a next quest for a fantasy RPG player.\n" \
+             f"Player level: {player_level}.\n" \
+             f"Inventory: {inventory}.\n" \
+             f"Completed quests: {completed_quests}.\n" \
+             f"Return short title + reason (1-2 sentences).";
+    resp = llm.complete(prompt=prompt, max_tokens=100, temperature=0.7);
+    return resp;
+}
 
 """Generate combat narration with dynamic outcomes"""
-def generate_combat_story(player_name: str, monster_name: str, player_inventory: list[str], outcome: str) -> str by llm();
+def generate_combat_story(player_name: str, monster_name: str, player_inventory: list[str], outcome: str) -> str {
+    prompt = f"Narrate a quick combat scene.\n" \
+             f"Player: {player_name}.\n" \
+             f"Monster: {monster_name}.\n" \
+             f"Player inventory: {player_inventory}.\n" \
+             f"Outcome: {outcome} (player perspective). Keep to 2-4 sentences.";
+    resp = llm.complete(prompt=prompt, max_tokens=120, temperature=0.8);
+    return resp;
+}
 
+# -----------------------------------------------------------------------------
 # Main Adventure API Walker
+# -----------------------------------------------------------------------------
 walker AdventureAPI {
     has player_id: str;
     has action: str = "status";
@@ -29,7 +85,9 @@ walker AdventureAPI {
     has dialogue: str = "";
     has item_name: str = "";
     
+    # ------------------------------------------------------------------
     # Player Management
+    # ------------------------------------------------------------------
     can create_player with `root entry {
         new_player = spawn here --> player(
             player_id=self.player_id,
@@ -46,7 +104,7 @@ walker AdventureAPI {
             "status": "player_created", 
             "player_id": self.player_id,
             "starting_room": "mystical_grove",
-            "timestamp": datetime.now().isoformat()
+            "timestamp": py.datetime.datetime.now().isoformat()
         };
     }
     
@@ -66,13 +124,15 @@ walker AdventureAPI {
                 "inventory": p.inventory,
                 "last_actions": p.action_history[-3:] if len(p.action_history) >= 3 else p.action_history,
                 "completed_quests": p.completed_quests,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": py.datetime.datetime.now().isoformat()
             };
         }
         return {"error": "Player not found"};
     }
     
+    # ------------------------------------------------------------------
     # Room and World Exploration
+    # ------------------------------------------------------------------
     can get_dynamic_room with `root entry {
         players = visit --> player;
         rooms = visit --> room;
@@ -111,7 +171,7 @@ walker AdventureAPI {
                 "npcs": r.npcs,
                 "exits": [exit.name for exit in exits],
                 "secrets": r.secrets,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": py.datetime.datetime.now().isoformat()
             };
         }
         return {"error": "Player or room not found"};
@@ -134,13 +194,15 @@ walker AdventureAPI {
                 "status": "moved",
                 "new_room": self.target,
                 "experience_gained": 5,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": py.datetime.datetime.now().isoformat()
             };
         }
         return {"error": "Cannot move to that location"};
     }
     
+    # ------------------------------------------------------------------
     # Combat System
+    # ------------------------------------------------------------------
     can fight_monster with `root entry {
         players = visit --> player;
         rooms = visit --> room;
@@ -158,14 +220,14 @@ walker AdventureAPI {
             total_damage = base_damage + weapon_bonus;
             
             # Player takes damage
-            monster_damage = random.randint(10, 25);
+            monster_damage = py.random.randint(10, 25);
             p.health -= monster_damage;
             p.experience += 30;
             
             # Remove monster and add loot
             r.monsters.remove(self.target);
             loot_items = ["gold coin", "magic gem", "healing potion", "ancient scroll"];
-            loot = random.choice(loot_items);
+            loot = py.random.choice(loot_items);
             r.items.append(loot);
             
             # Generate combat story
@@ -183,13 +245,15 @@ walker AdventureAPI {
                 "loot_found": loot,
                 "current_health": p.health,
                 "combat_story": combat_story,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": py.datetime.datetime.now().isoformat()
             };
         }
         return {"error": "Monster not found in current room"};
     }
     
+    # ------------------------------------------------------------------
     # Inventory Management
+    # ------------------------------------------------------------------
     can take_item with `root entry {
         players = visit --> player;
         rooms = visit --> room;
@@ -209,7 +273,7 @@ walker AdventureAPI {
                 "status": "item_taken",
                 "item": self.target,
                 "inventory": p.inventory,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": py.datetime.datetime.now().isoformat()
             };
         }
         return {"error": "Item not found in current room"};
@@ -245,13 +309,15 @@ walker AdventureAPI {
                 "effect": effect,
                 "current_health": p.health,
                 "current_experience": p.experience,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": py.datetime.datetime.now().isoformat()
             };
         }
         return {"error": "Item not in inventory"};
     }
     
+    # ------------------------------------------------------------------
     # NPC Interaction
+    # ------------------------------------------------------------------
     can talk_to_npc with `root entry {
         players = visit --> player;
         rooms = visit --> room;
@@ -279,13 +345,15 @@ walker AdventureAPI {
                 "npc": self.target,
                 "player_message": self.dialogue,
                 "npc_response": npc_response,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": py.datetime.datetime.now().isoformat()
             };
         }
         return {"error": "NPC not found in current room"};
     }
     
+    # ------------------------------------------------------------------
     # Quest System
+    # ------------------------------------------------------------------
     can get_quest_suggestion with `root entry {
         players = visit --> player;
         current_player = [p for p in players if p.player_id == self.player_id];
@@ -304,7 +372,7 @@ walker AdventureAPI {
                 "quest_suggestion": quest_suggestion,
                 "player_level": player_level,
                 "suitable_for_level": player_level,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": py.datetime.datetime.now().isoformat()
             };
         }
         return {"error": "Player not found"};
@@ -316,7 +384,7 @@ walker AdventureAPI {
         
         if current_player {
             p = current_player[0];
-            quest_reward = random.randint(50, 100);
+            quest_reward = py.random.randint(50, 100);
             
             p.completed_quests.append(self.target);
             p.experience += quest_reward;
@@ -328,13 +396,15 @@ walker AdventureAPI {
                 "experience_reward": quest_reward,
                 "total_experience": p.experience,
                 "new_level": p.experience // 100,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": py.datetime.datetime.now().isoformat()
             };
         }
         return {"error": "Player not found"};
     }
     
+    # ------------------------------------------------------------------
     # World Information
+    # ------------------------------------------------------------------
     can get_world_map with `root entry {
         rooms = visit --> room;
         room_connections = {};
@@ -353,12 +423,14 @@ walker AdventureAPI {
         return {
             "world_map": room_connections,
             "total_rooms": len(rooms),
-            "timestamp": datetime.now().isoformat()
+            "timestamp": py.datetime.datetime.now().isoformat()
         };
     }
 }
 
+# -----------------------------------------------------------------------------
 # Player Node - Represents game state for each player
+# -----------------------------------------------------------------------------
 node player {
     has player_id: str;
     has name: str;
@@ -369,10 +441,12 @@ node player {
     has action_history: list[str] = [];
     has conversation_history: list[str] = [];
     has completed_quests: list[str] = [];
-    has creation_time: str = datetime.now().isoformat();
+    has creation_time: str = py.datetime.datetime.now().isoformat();
 }
 
+# -----------------------------------------------------------------------------
 # Room Node - Represents locations in the game world
+# -----------------------------------------------------------------------------
 node room {
     has name: str;
     has description: str;
@@ -383,7 +457,9 @@ node room {
     has visit_count: int = 0;
 }
 
+# -----------------------------------------------------------------------------
 # Initialize the game world when running in CLI mode
+# -----------------------------------------------------------------------------
 with entry:__main__ {
     print("🌟 Initializing AI-Enhanced Text Adventure World...\n");
     
